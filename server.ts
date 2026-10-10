@@ -13,6 +13,11 @@ import {
   validateIncomingImportRows,
   MODEL_VERSION,
 } from './src/shared/analytics';
+import {
+  generateEvidenceBoundAnalystResponse,
+  runAnalystAcceptanceTestSuite,
+  verifyCandidateResponseAgainstLedger,
+} from './src/shared/aiAnalystEngine';
 
 const PORT = 3000;
 const SERVER_START_MS = Date.now();
@@ -85,19 +90,27 @@ async function startServer() {
     }
   });
 
-  // Actionable AI Live Market & Capital Allocation Strategist
+  // Evidence-Bound AI Live Market & Capital Allocation Analyst (No Fabricated Entry/Exit or Ungrounded Claims)
   app.post('/api/market/ai-trade-advisor', async (req, res) => {
     try {
-      const capitalToman = Math.max(
-        1_000_000,
-        Number(req.body?.capitalToman || 500_000_000)
-      );
-      const horizonFa = String(req.body?.horizonFa || 'میان‌مدت (۳ تا ۶ ماه)');
-      const riskProfileFa = String(req.body?.riskProfileFa || 'متعادل (رشد و پوشش تورم)');
+      const rawCap = req.body?.capitalToman;
+      const capitalAmount =
+        rawCap !== undefined && rawCap !== null && Number(rawCap) > 0
+          ? Number(rawCap)
+          : null;
+      const capitalUnit: 'TOMAN' | 'IRR' | 'UNSPECIFIED' =
+        req.body?.capitalUnit === 'IRR'
+          ? 'IRR'
+          : capitalAmount !== null
+            ? 'TOMAN'
+            : 'UNSPECIFIED';
+      const horizonFa = req.body?.horizonFa || 'UNSPECIFIED';
+      const riskToleranceFa = req.body?.riskProfileFa || 'UNSPECIFIED';
+      const liquidityNeedFa = req.body?.liquidityNeedFa || 'UNSPECIFIED';
       const customQuestion = sanitizePromptInput(
         String(
           req.body?.question ||
-            'با توجه به نرخ‌های لحظه‌ای امروز، بهترین ترکیب خرید بین طلا، سهام بورس، دلار، خودرو و مسکن چیست و در چه قیمت‌هایی وارد شوم؟'
+            'ارزیابی مستند شکاف قیمت بازار و ارزش ذاتی دارایی‌ها همراه با شروط ابطال'
         )
       );
 
@@ -105,99 +118,107 @@ async function startServer() {
       const latestHousingVal =
         housingDetail && housingDetail.observations.length > 0
           ? housingDetail.observations[housingDetail.observations.length - 1].value
-          : 968.5;
+          : 1385;
       const live = await fetchLiveIranMarketSnapshot(latestHousingVal, false);
-      const s = live.summaryIndicators;
+      db.syncLiveMarketToObservations(live);
+      const snapshot = db.getFullAnalyticalSnapshot();
 
-      const liveContext = `
-=== نرخ‌های لحظه‌ای و محاسبات ارزش ذاتی بازار ایران (${live.fetchedAtIso}) ===
-- دلار آزاد تهران: ${s.dollarFreeToman.toLocaleString('fa-IR')} تومان | تتر (USDT): ${s.tetherUsdtToman.toLocaleString('fa-IR')} تومان (اسپرد: ${s.dollarTetherSpreadPct}%)
-- درهم امارات: ${s.dirhamUaeToman.toLocaleString('fa-IR')} تومان | دلار معادل حواله درهم (×۳.۶۷۲۵): ${s.dirhamImpliedDollarToman.toLocaleString('fa-IR')} تومان (شکاف دلار با درهم: ${s.dollarDirhamSpreadPct}%)
-- هر گرم طلای ۱۸ عیار: ${s.gold18kGramToman.toLocaleString('fa-IR')} تومان | ارزش ذاتی ۱۸ عیار: ${s.gold18kIntrinsicToman.toLocaleString('fa-IR')} تومان (حباب: ${s.gold18kBubblePct}%)
-- سکه تمام امامی: ${s.coinEmamiToman.toLocaleString('fa-IR')} تومان | ارزش ذاتی سکه: ${s.coinEmamiIntrinsicToman.toLocaleString('fa-IR')} تومان (حباب: ${s.coinEmamiBubblePct}%)
-- نیم سکه: ${s.coinHalfToman.toLocaleString('fa-IR')} تومان (حباب: ${s.coinHalfBubblePct}%) | ربع سکه: ${s.coinQuarterToman.toLocaleString('fa-IR')} تومان (حباب: ${s.coinQuarterBubblePct}%)
-- انس جهانی طلا: ${s.globalOunceUsd} دلار | شاخص کل بورس (TEDPIX): ${s.tedpixIndex.toLocaleString('fa-IR')} واحد
-- میانگین هر متر مسکن تهران: ${s.tehranHousingSqmToman.toLocaleString('fa-IR')} تومان (${s.tehranHousingSqmUsd} دلار) | نسبت هر متر مسکن به طلای ۱۸ عیار: ${s.housingPerGoldGramRatio} گرم طلا
+      const bundle = {
+        ...snapshot,
+        liveMarket: live,
+      };
 
-=== مشخصات سرمایه کاربر ===
-- مبلغ کل سرمایه خرید: ${capitalToman.toLocaleString('fa-IR')} تومان
-- افق سرمایه‌گذاری: ${horizonFa}
-- درجه ریسک‌پذیری: ${riskProfileFa}
-- پرسش اختصاصی کاربر: ${customQuestion}`;
-
-      const systemInstruction = `شما «استراتژیست ارشد معاملات و تخصیص سرمایه بازارهای ایران در سامانه EcoMat» هستید.
-وظیفه شما ارائه برنامه عملیاتی، عددی و قابل استناد برای باز کردن معامله، خرید سهام، طلا، ارز، خودرو و مسکن بر اساس نرخ‌های لایو دریافت‌شده است.
-قواعد پاسخ‌دهی:
-1. دقیقاً بر اساس مبلغ سرمایه کاربر (${capitalToman.toLocaleString('fa-IR')} تومان) مشخص کنید چه درصدی و چه مبلغ دقیقی (به تومان) به هر بازار اختصاص یابد و با قیمت لایو فعلی چه تعداد واحد/گرم/سهم قابل خرید است.
-2. برای هر پیشنهاد، «محدوده ورود پله‌ای (پله ۱ و ۲)»، «حد سود اول و دوم» و «حد ضرر یا شرط خروج» را به صورت عددی بنویسید.
-3. وضعیت ۵ بازار ایران (طلا و سکه، دلار و تتر، بورس و نمادهای پیشرو مثل فملی/شپنا/وبملت/عیار، خودرو و مسکن) را بر اساس اعداد واقعی بالا مقایسه کنید (مثلاً مقایسه حباب ${s.gold18kBubblePct}% طلای ۱۸ عیار با حباب ${s.coinQuarterBubblePct}% ربع سکه، یا نسبت ${s.housingPerGoldGramRatio} گرم طلا به ازای هر متر مسکن).
-4. پاسخ باید کاملاً ساختاریافته، شفاف و به زبان فارسی حرفه‌ای باشد.`;
+      const baseResponse = generateEvidenceBoundAnalystResponse(bundle, {
+        questionFa: customQuestion,
+        userProfile: {
+          capitalAmount,
+          capitalUnit,
+          horizonFa,
+          riskToleranceFa,
+          liquidityNeedFa,
+        },
+      });
 
       const apiKey = process.env.GEMINI_API_KEY;
-      if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
+      if (
+        apiKey &&
+        apiKey !== 'MY_GEMINI_API_KEY' &&
+        baseResponse.analysisRestrictionStatus !==
+          'ABSTAINED_INSUFFICIENT_OR_INVALID_DATA'
+      ) {
         try {
-          const ai = new GoogleGenAI({ apiKey });
-          const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: `${liveContext}\n\nلطفاً برنامه دقیق معاملاتی و تخصیص سرمایه را ارائه دهید.`,
-            config: {
-              systemInstruction,
-              temperature: 0.25,
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
             },
           });
 
-          if (response.text) {
-            res.json({
-              answerFa: response.text,
-              mode: 'LIVE_GEMINI_STRATEGIST',
-              generatedAt: new Date().toISOString(),
-            });
-            return;
+          const allowedEvidenceText = baseResponse.usedEvidence
+            .map(
+              (e) =>
+                `- [${e.code} | دوره: ${e.solarPeriod} | منبع: ${e.sourceId} | وضعیت: ${e.qualityLabelFa}]: ${e.displayValueFa} ${e.unitFa}`
+            )
+            .join('\n');
+
+          const systemInstruction = `شما «تحلیلگر مستند و مقید به شواهد EcoMat» هستید.
+قواعد اجباری:
+1. هرگز هیچ عدد، قیمت، بازده، احتمال، نقطه ورود/خروج یا حد سود/ضرر عددی که در شواهد ورودی زیر نیست نسازید.
+2. بین قیمت بازار، ارزش ذاتی برآوردی، پیش‌بینی آماری و فرض سناریو تفکیک صریح قائل شوید.
+3. اگر اطلاعات شخصی کاربر (${baseResponse.userProfileAudit.unassumedMissingFieldsFa.join('، ') || 'کامل'}) ناقص است، آن را حدس نزنید.
+4. صرفاً از ارقام فهرست زیر استفاده کنید (هر عدد خارج از این فهرست توسط ممیز مستقل مسدود می‌شود):
+${allowedEvidenceText}`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: customQuestion,
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+            },
+          });
+
+          const candidateText = response.text;
+          if (candidateText) {
+            const verification = verifyCandidateResponseAgainstLedger(
+              candidateText,
+              baseResponse.usedEvidence,
+              baseResponse.flaggedOrUnavailableInputs,
+              bundle,
+              {
+                questionFa: customQuestion,
+                userProfile: {
+                  capitalAmount,
+                  capitalUnit,
+                  horizonFa,
+                  riskToleranceFa,
+                  liquidityNeedFa,
+                },
+              }
+            );
+
+            if (verification.passedIndependentAudit) {
+              res.json({
+                ...baseResponse,
+                answerFa: candidateText,
+                mode: 'EVIDENCE_BOUND_GEMINI_VERIFIED',
+                modelUsed: 'gemini-3.8-flash',
+                independentVerification: verification,
+              });
+              return;
+            }
           }
         } catch (err) {
-          console.warn('AI trade advisor fallback triggered:', err);
+          console.warn('Gemini verification fallback triggered:', err);
         }
       }
 
-      // Deterministic quantitative allocation response grounded in live prices
-      const goldShare = Math.round(capitalToman * 0.35);
-      const stockShare = Math.round(capitalToman * 0.35);
-      const fxFixedShare = capitalToman - goldShare - stockShare;
-      const goldGrams = (goldShare / s.gold18kGramToman).toFixed(2);
-      const usdtUnits = Math.round(fxFixedShare / s.tetherUsdtToman);
-
-      const fallbackPlan = `### برنامه عملیاتی تخصیص سرمایه برای مبلغ ${capitalToman.toLocaleString('fa-IR')} تومان (${riskProfileFa} — ${horizonFa})
-
-#### ۱. تفکیک ریاضی سبد خرید بر اساس قیمت‌های لحظه‌ای امروز
-1. **بخش اول: طلای ۱۸ عیار / صندوق‌های طلای بورس (نماد عیار/طلا) — ۳۵٪ سرمایه (${goldShare.toLocaleString('fa-IR')} تومان)**
-   - **معادل مقداری در قیمت لایو (${s.gold18kGramToman.toLocaleString('fa-IR')} تومان):** خرید حدود **${goldGrams} گرم** طلای ۱۸ عیار.
-   - **چرا طلای ۱۸ عیار و نه سکه؟** حباب طلای ۱۸ عیار هم‌اکنون تنها **${s.gold18kBubblePct}٪** است، در حالی که سکه امامی **${s.coinEmamiBubblePct}٪** و ربع‌سکه **${s.coinQuarterBubblePct}٪** حباب دارند.
-   - **نقطه ورود پله‌ای:** ۵۰٪ در قیمت فعلی تابلو (${s.gold18kGramToman.toLocaleString('fa-IR')} تومان) و ۵۰٪ در محدوده حمایتی ${Math.round(s.gold18kGramToman * 0.975).toLocaleString('fa-IR')} تومان.
-   - **حد سود میان‌مدت:** ${Math.round(s.gold18kGramToman * 1.24).toLocaleString('fa-IR')} تومان.
-
-2. **بخش دوم: سبد سهام بنیادی و دلاری بورس تهران — ۳۵٪ سرمایه (${stockShare.toLocaleString('fa-IR')} تومان)**
-   - **ترکیب پیشنهادی خرید سهام:**
-     - **فملی (ملی صنایع مس ایران):** ۳۰٪ از بودجه سهام — محدوده خرید: ۷,۱۵۰ تا ۷,۴۵۰ ریال | هدف: ۹,۸۰۰ ریال | حد ضرر: ۶,۶۵۰ ریال (P/E: 4.8).
-     - **شپنا (پالایش نفت اصفهان):** ۳۰٪ از بودجه سهام — محدوده خرید: ۳,۹۸۰ تا ۴,۲۰۰ ریال | هدف: ۵,۶۵۰ ریال | حد ضرر: ۳,۶۹۰ ریال (P/E: 4.3).
-     - **وبملت (بانک ملت):** ۲۵٪ از بودجه سهام — محدوده خرید: ۳,۵۰۰ تا ۳,۷۰۰ ریال | هدف: ۴,۹۵۰ ریال | حد ضرر: ۳,۲۲۰ ریال (منتفع از تسعیر ارز).
-     - **فولاد / فارس:** ۱۵٪ از بودجه سهام — جهت دریافت سود نقدی مجمع و پوشش رشد دلار توافقی.
-
-3. **بخش سوم: نقدینگی پشتیبان و پوشش ارزی (صندوق درآمد ثابت آگاس/کمند + تتر) — ۳۰٪ سرمایه (${fxFixedShare.toLocaleString('fa-IR')} تومان)**
-   - **معادل دلاری در صورت خرید تتر:** **${usdtUnits.toLocaleString('fa-IR')} واحد USDT** با نرخ لحظه‌ای ${s.tetherUsdtToman.toLocaleString('fa-IR')} تومان (برابری حواله درهم: ${s.dirhamImpliedDollarToman.toLocaleString('fa-IR')} تومان).
-   - **کاربرد معاملاتی:** نگهداری در صندوق درآمد ثابت روزشمار (سود ۳۱.۵٪ سالانه) تا در صورت اصلاح ۳ تا ۵ درصدی بازار، پله‌های دوم خرید طلا و سهام با این نقدینگی اجرا شود.
-
-#### ۲. وضعیت خودرو و مسکن نسبت به بودجه شما
-- **بازار مسکن:** نسبت هر متر آپارتمان تهران (${s.tehranHousingSqmToman.toLocaleString('fa-IR')} تومان) به طلای ۱۸ عیار به **${s.housingPerGoldGramRatio} گرم طلا** رسیده که کف تاریخی ۱۰ ساله است. ${capitalToman >= 3_500_000_000 ? 'از آنجا که سرمایه شما بالای ۳.۵ میلیارد تومان است، تبدیل بخشی از طلا به آپارتمان مصرفی ۶۵ تا ۸۵ متری با ۱۰٪ تخفیف نقدی پای معامله بسیار ارزنده است.' : 'برای سرمایه‌های زیر ۳.۵ میلیارد تومان، خرید واحدهای صندوق طلا و سهام دلاری بازدهی و نقدشوندگی بسیار بهتری نسبت به درگیر کردن سرمایه در ملک غیرنقدشونده دارد.'}
-- **بازار خودرو:** خرید خودرو از بازار آزاد (مانند پژو ۲۰۷ اتوماتیک در محدوده ${Math.round(s.dollarFreeToman * 8150).toLocaleString('fa-IR')} تومان) صرفاً برای مصرف شخصی توصیه می‌شود و برای سرمایه‌گذاری، شرکت در طرح‌های فروش کارخانه‌ای (با شکاف ۳۰٪ تا ۴۰٪) ارجحیت دارد.`;
-
-      res.json({
-        answerFa: fallbackPlan,
-        mode: 'QUANTITATIVE_LIVE_ENGINE',
-        generatedAt: new Date().toISOString(),
-      });
+      res.json(baseResponse);
     } catch (err) {
       res.status(500).json({
-        error: err instanceof Error ? err.message : 'خطا در تولید برنامه تخصیص سرمایه',
+        error: err instanceof Error ? err.message : 'خطا در اجرای تحلیلگر مستند بازار',
       });
     }
   });
@@ -361,168 +382,171 @@ async function startServer() {
     }
   });
 
-  // 9. Retrieval-Grounded AI Economic Analyst (Section 20)
+  // 9. Evidence-Bound AI Economic Analyst with Independent Post-Generation Verifier
   app.post('/api/analyst/ask', async (req, res) => {
-    const rawQuestion = String(req.body?.question || '');
-    const question = sanitizePromptInput(rawQuestion);
-    if (!question) {
-      res.status(400).json({ error: 'لطفاً پرسش تحلیلی خود را وارد نمایید.' });
-      return;
-    }
-
-    const snapshot = db.getFullAnalyticalSnapshot();
-
-    // Build structured grounding context from actual stored DB records
-    const latestMetricsSummary = snapshot.engines
-      .flatMap((eng) =>
-        eng.primaryMetrics.map(
-          (m) =>
-            `- ${m.labelFa} [${m.indicatorCode} | دوره: ${m.solarPeriod} (${m.observationPeriod}) | منبع: ${m.sourceId}]: مقدار = ${m.value} ${m.unitFa} (تغییر نسبت به دوره قبل: ${m.changeFromPrev ?? 'نامشخص'}، صدک تاریخی: ${m.historicalPercentile ?? 'نامشخص'}%)`
-        )
-      )
-      .join('\n');
-
-    const compositeSummary = snapshot.compositeIndices
-      .map(
-        (c) =>
-          `- ${c.nameFa} [${c.code}]: امتیاز وزن‌دار = ${c.score ?? 'Insufficient Data'}/100 | خط مبنای هم‌وزن = ${c.equalWeightScore ?? 'N/A'}/100 | تفسیر: ${c.interpretationFa}`
-      )
-      .join('\n');
-
-    const activeRegimesSummary = snapshot.regimes
-      .map(
-        (r) =>
-          `- ${r.nameFa}: وضعیت = ${r.isActive ? 'فعال (Active)' : 'غیرفعال'} (امتیاز انطباق قواعد: ${r.activationScore}/100) | شرط نقض: ${r.invalidationConditionsFa}`
-      )
-      .join('\n');
-
-    const missingOrStaleSummary = snapshot.indicators
-      .filter((i) => i.status !== 'ACTIVE_VERIFIED')
-      .map((i) => `- ${i.nameFa} [${i.code}]: وضعیت = ${i.status} (${i.historicalCoverage})`)
-      .join('\n');
-
-    const portfolioSummary = snapshot.portfolio.assets
-      .map(
-        (a) =>
-          `- ${a.asset.nameFa}: بازده اسمی ۱۲ماهه = ${a.nominalReturn12MPct}% | بازده حقیقی خالص پس از کسر هزینه معاملاتی و تورم = ${a.realReturn12MPct}% | حداکثر افت حقیقی (Max Drawdown) = ${a.maxDrawdownRealPct}%`
-      )
-      .join('\n');
-
-    const citedEvidence = [
-      {
-        code: 'CPI_HEADLINE',
-        solarPeriod: '۱۴۰۵/۰۷',
-        source: 'SCI',
-        value: '38.4%',
-      },
-      {
-        code: 'PPI_HEADLINE',
-        solarPeriod: '۱۴۰۵/۰۷',
-        source: 'SCI',
-        value: '40.4%',
-      },
-      {
-        code: 'M2_LIQUIDITY',
-        solarPeriod: '۱۴۰۵/۰۷',
-        source: 'CBI',
-        value: '134,890 هزار میلیارد ریال (+19.5% YoY)',
-      },
-      {
-        code: 'GOLD_COIN_REF',
-        solarPeriod: '۱۴۰۵/۰۷ (لایو)',
-        source: 'TSETMC / TGJU',
-        value: '2,615 میلیون ریال (261.5 میلیون تومان)',
-      },
-      {
-        code: 'FX_INFORMAL_REF',
-        solarPeriod: '۱۴۰۵/۰۷ (لایو)',
-        source: 'NOBITEX / TGJU',
-        value: '1,515,500 ریال (151,550 تومان)',
-      },
-      {
-        code: 'AKHZA_YTM_INDEX',
-        solarPeriod: '۱۴۰۵/۰۷',
-        source: 'TSETMC',
-        value: '38.4%',
-      },
-    ];
-
-    const systemInstruction = `شما «تحلیلگر هوشمند اقتصاد کلان و بازارهای لایو EcoMat» هستید.
-وظیفه شما پاسخ‌دهی علمی، مستند و شفاف به زبان فارسی بر اساس داده‌های واقعی و لایو ذخیره‌شده در پایگاه داده EcoMat (به‌روز تا مهر ۱۴۰۵ — اکتبر ۲۰۲۶) است.
-اصول غیرقابل مذاکره:
-1. هرگز هیچ عدد، شاخص، تاریخ انتشار یا منبعی را از خودتان اختراع نکنید. صرفاً از داده‌های ارائه‌شده در متن بازیابی‌شده (Retrieval Context) استفاده کنید.
-2. برای هر ادعای آماری، کد شاخص، دوره مشاهده شمسی و منبع را در قالب [کد شاخص | دوره | منبع] ذکر کنید (مثلاً [CPI_HEADLINE | ۱۴۰۵/۰۷ | SCI]).
-3. بین «واقعیت مشاهده‌شده»، «شاخص محاسبه‌شده»، «رابطه آماری» و «تفسیر تحلیلی یا سناریو» تمایز صریح قائل شوید.
-4. اگر کاربر درباره شاخصی پرسید که در فهرست داده‌های مفقود یا منتشرنشده است (مانند ذخایر ارزی خالص بانک مرکزی FOREIGN_RESERVES_NET یا شاخص تولید صنعتی INDUSTRIAL_PROD_INDEX)، صراحتاً اعلام کنید که این داده در حال حاضر منتشر نشده یا نیازمند ورود دستی است.
-
-داده‌های بازیابی‌شده از پایگاه داده EcoMat (نسخه مدل ${MODEL_VERSION}):
-=== ۱. آخرین مشاهدات و شاخص‌های کلیدی (مهر ۱۴۰۵ و فید لایو) ===
-${latestMetricsSummary}
-
-=== ۲. شاخص‌های ترکیبی (مقیاس ۰ تا ۱۰۰) ===
-${compositeSummary}
-
-=== ۳. وضعیت رژیم‌های کلان اقتصادی ===
-${activeRegimesSummary}
-
-=== ۴. عملکرد حقیقی و اسمی طبقات دارایی (۱۲ ماهه منتهی به مهر ۱۴۰۵) ===
-${portfolioSummary}
-
-=== ۵. شاخص‌های مفقود، دارای وقفه یا نیازمند ورود دستی ===
-${missingOrStaleSummary}`;
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: question,
-          config: {
-            systemInstruction,
-            temperature: 0.2,
-          },
-        });
-
-        const answerText = response.text;
-        if (answerText) {
-          res.json({
-            answerFa: answerText,
-            mode: 'GEMINI_GROUNDED_RAG',
-            modelUsed: 'gemini-3-flash-preview',
-            citedEvidence,
-            retrievedAt: new Date().toISOString(),
-          });
-          return;
-        }
-      } catch (err) {
-        console.warn('Gemini call fallback triggered:', err);
+    try {
+      const rawQuestion = String(req.body?.question || '');
+      const question = sanitizePromptInput(rawQuestion);
+      if (!question) {
+        res.status(400).json({ error: 'لطفاً پرسش تحلیلی خود را وارد نمایید.' });
+        return;
       }
+
+      const housingDetail = db.getIndicatorDetail('HOUSING_TEHRAN_PRICE');
+      const latestHousingVal =
+        housingDetail && housingDetail.observations.length > 0
+          ? housingDetail.observations[housingDetail.observations.length - 1].value
+          : 1385;
+      const liveSnapshot = await fetchLiveIranMarketSnapshot(latestHousingVal, false);
+      db.syncLiveMarketToObservations(liveSnapshot);
+      const snapshot = db.getFullAnalyticalSnapshot();
+
+      const bundle = {
+        ...snapshot,
+        liveMarket: liveSnapshot,
+      };
+
+      const userProfile = req.body?.userProfile || undefined;
+      const simulationOverrides = req.body?.simulationOverrides || undefined;
+
+      const baseResponse = generateEvidenceBoundAnalystResponse(bundle, {
+        questionFa: question,
+        userProfile,
+        simulationOverrides,
+      });
+
+      const citedEvidence = baseResponse.usedEvidence.slice(0, 8).map((ev) => ({
+        code: ev.code,
+        solarPeriod: ev.solarPeriod,
+        source: ev.sourceId,
+        value: `${ev.displayValueFa} ${ev.unitFa} (${ev.qualityLabelFa})`,
+      }));
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (
+        apiKey &&
+        apiKey !== 'MY_GEMINI_API_KEY' &&
+        !simulationOverrides?.injectedCandidateLlmTextFa &&
+        baseResponse.analysisRestrictionStatus !==
+          'ABSTAINED_INSUFFICIENT_OR_INVALID_DATA'
+      ) {
+        try {
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              },
+            },
+          });
+
+          const evidenceLines = baseResponse.usedEvidence
+            .map(
+              (ev) =>
+                `- ${ev.nameFa} [${ev.code} | دوره: ${ev.solarPeriod} | منبع: ${ev.sourceId} | کیفیت: ${ev.qualityLabelFa}]: مقدار = ${ev.displayValueFa} ${ev.unitFa}`
+            )
+            .join('\n');
+
+          const flaggedLines = baseResponse.flaggedOrUnavailableInputs
+            .map(
+              (fl) =>
+                `- [محدودیت/هشدار ${fl.qualityStatus}] ${fl.nameFa} [${fl.code}]: ${fl.methodologyOrWarningFa}`
+            )
+            .join('\n');
+
+          const systemInstruction = `شما «تحلیلگر مستند و مقید به شواهد EcoMat» هستید.
+الزامات غیرقابل مذاکره:
+1. فقط به داده‌های معتبر و قابل ردیابی زیر استناد کنید و برای هر عدد، [کد شاخص | دوره | منبع] را ذکر نمایید.
+2. داده‌های نامعتبر، منقضی، دارای اختلاف منبع یا برآوردی را صریحاً برچسب‌گذاری کنید و هرگز واقعیت مشاهده‌شده معرفی نکنید.
+3. قیمت بازار، ارزش ذاتی برآوردی، پیش‌بینی آماری و فرض سناریو را تفکیک کنید.
+4. هرگز نقاط ورود/خروج عددی، حد سود/ضرر ساختگی یا بازده تضمین‌شده تولید نکنید.
+5. هر عدد خارج از شواهد زیر توسط ممیز مستقل سامانه مسدود خواهد شد.
+
+=== شواهد معتبر و قابل ردیابی ===
+${evidenceLines}
+
+=== ورودی‌های نامعتبر، منقضی یا مفقود ===
+${flaggedLines}`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: question,
+            config: {
+              systemInstruction,
+              temperature: 0.1,
+            },
+          });
+
+          const candidateText = response.text;
+          if (candidateText) {
+            const verification = verifyCandidateResponseAgainstLedger(
+              candidateText,
+              baseResponse.usedEvidence,
+              baseResponse.flaggedOrUnavailableInputs,
+              bundle,
+              {
+                questionFa: question,
+                userProfile,
+                simulationOverrides,
+              }
+            );
+
+            if (verification.passedIndependentAudit) {
+              res.json({
+                ...baseResponse,
+                answerFa: candidateText,
+                mode: 'EVIDENCE_BOUND_GEMINI_VERIFIED',
+                modelUsed: 'gemini-3.8-flash',
+                independentVerification: verification,
+                citedEvidence,
+                retrievedAt: baseResponse.generatedAt,
+              });
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Gemini call fallback triggered:', err);
+        }
+      }
+
+      res.json({
+        ...baseResponse,
+        citedEvidence,
+        retrievedAt: baseResponse.generatedAt,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'خطا در اجرای تحلیلگر مستند',
+      });
     }
+  });
 
-    // Deterministic retrieval-grounded synthesis when Gemini API key is not active or network fails
-    const deterministicAnswer = `### پاسخ مستند مبتنی بر پایگاه داده تحلیلی و فید لایو EcoMat (مهر ۱۴۰۵)
-
-**۱. شواهد مشاهده‌شده و نرخ‌های لایو بازار (Observed Facts & Live Market):**
-- بر اساس آخرین گزارش ثبت‌شده مرکز آمار ایران، تورم نقطه‌به‌نقطه در مهر ۱۴۰۵ به **۳۸.۴٪** \`[CPI_HEADLINE | ۱۴۰۵/۰۷ | SCI]\` و تورم ماهانه به **۲.۶٪** \`[CPI_MOM | ۱۴۰۵/۰۷ | SCI]\` رسیده است.
-- در فید زنده بازار ایران، نرخ دلار آزاد و تتر در محدوده **۱۵۱,۵۵۰ تومان (۱,۵۱۵,۵۰۰ ریال)** \`[FX_INFORMAL_REF | ۱۴۰۵/۰۷ | LIVE]\`، سکه تمام امامی در سطح **۲۶۱.۵ میلیون تومان** \`[GOLD_COIN_REF | ۱۴۰۵/۰۷ | LIVE]\` و شاخص کل بورس در محدوده **۲,۹۲۰,۰۰۰ واحد** \`[TEDPIX_INDEX | ۱۴۰۵/۰۷ | TSETMC]\` قرار دارد.
-- در بخش پولی، حجم نقدینگی به **۱۳۴,۸۹۰ هزار میلیارد ریال (۱۳,۴۸۹ همت)** رسیده \`[M2_LIQUIDITY | ۱۴۰۵/۰۷ | CBI]\` و سهم پول دیداری سیال به **۳۱.۶٪** افزایش یافته است \`[M1_SHARE_IN_M2 | ۱۴۰۵/۰۷ | CBI]\`.
-
-**۲. شاخص‌های ترکیبی و رژیم‌های فعال (Calculated Indicators & Regimes):**
-- سه رژیم **«تورم مزمن بالا»**، **«انقباض پولی و تنگنای اعتباری»** (با نرخ اخزای **۳۸.۴٪** \`[AKHZA_YTM_INDEX | ۱۴۰۵/۰۷ | TSETMC]\`) و **«تنش ارزی و انتظارات تورمی»** به‌طور هم‌زمان فعال هستند.
-
-**۳. پیامدهای تخصیص دارایی و محدودیت‌های داده (Portfolio Implications & Data Gaps):**
-- در شرایط فعلی مهر ۱۴۰۵، ترکیب **طلای ۱۸ عیار / صندوق‌های طلا** (به دلیل حباب نزدیک به صفر نسبت به سکه)، **سهام کامودیتی‌محور دلاری با P/E زیر ۵** و **اوراق درآمد ثابت اخزا (۳۸.۴٪ بازده مؤثر)** بیشترین بازده تعدیل‌شده با ریسک را در بک‌تست نقطه‌ای ثبت کرده‌اند.
-- **محدودیت‌های شفاف داده:** آمار «ذخایر ارزی خالص بانک مرکزی» \`[FOREIGN_RESERVES_NET]\` به‌صورت رسمی منتشر نمی‌شود و شاخص «تولید کارگاه‌های بزرگ صنعتی» \`[INDUSTRIAL_PROD_INDEX]\` در انتظار بارگذاری فایل رسمی جدید است.`;
-
-    res.json({
-      answerFa: deterministicAnswer,
-      mode: 'DETERMINISTIC_DB_SYNTHESIS',
-      modelUsed: MODEL_VERSION,
-      citedEvidence,
-      retrievedAt: new Date().toISOString(),
-    });
+  // 10. Acceptance Test Suite Endpoint (7 Adversarial & Edge-Case Scenarios)
+  app.get('/api/analyst/acceptance-tests', async (_req, res) => {
+    try {
+      const housingDetail = db.getIndicatorDetail('HOUSING_TEHRAN_PRICE');
+      const latestHousingVal =
+        housingDetail && housingDetail.observations.length > 0
+          ? housingDetail.observations[housingDetail.observations.length - 1].value
+          : 1385;
+      const liveSnapshot = await fetchLiveIranMarketSnapshot(latestHousingVal, false);
+      const snapshot = db.getFullAnalyticalSnapshot();
+      const results = runAnalystAcceptanceTestSuite({
+        ...snapshot,
+        liveMarket: liveSnapshot,
+      });
+      res.json({
+        executedAt: new Date().toISOString(),
+        totalScenarios: results.length,
+        passedCount: results.filter((r) => r.passed).length,
+        failedCount: results.filter((r) => !r.passed).length,
+        scenarios: results,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'خطا در اجرای آزمون‌های پذیرش مشاور هوشمند',
+      });
+    }
   });
 
   // Vite middleware in development, static dist in production

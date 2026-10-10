@@ -4,6 +4,7 @@ import {
   MarketOpportunitySignal,
   BourseStockOpportunity,
   SectorDeepDiveOutlook,
+  EvidenceBoundAnalystResponse,
 } from '../shared/types';
 import {
   RefreshCw,
@@ -57,10 +58,15 @@ export const LiveMarketOpportunitiesView: React.FC<LiveMarketOpportunitiesViewPr
   const [horizon, setHorizon] = useState<'SHORT_1_3M' | 'MEDIUM_3_6M' | 'LONG_6_12M'>(
     'MEDIUM_3_6M'
   );
+  const [liquidityNeedFa, setLiquidityNeedFa] = useState<string>(
+    'متوسط (قابل دسترسی در ۱ هفته)'
+  );
   const [customAdvisorQuestion, setCustomAdvisorQuestion] = useState<string>(
-    'با توجه به قیمت لحظه‌ای طلا، دلار و عقب‌ماندگی بورس و مسکن، این سرمایه را در چند پله و روی چه دارایی‌هایی تقسیم کنم؟'
+    'بر اساس قیمت بازار و ارزش ذاتی طلای ۱۸ عیار، سکه و اوراق اخزا، چه شواهد و شروط ابطالی برای تخصیص این سرمایه وجود دارد؟'
   );
   const [advisorResponse, setAdvisorResponse] = useState<string | null>(null);
+  const [advisorFullData, setAdvisorFullData] =
+    useState<EvidenceBoundAnalystResponse | null>(null);
   const [advisorLoading, setAdvisorLoading] = useState<boolean>(false);
 
   const fetchLiveMarket = useCallback(async (force = false) => {
@@ -342,13 +348,15 @@ export const LiveMarketOpportunitiesView: React.FC<LiveMarketOpportunitiesViewPr
               ? 'محافظه‌کارانه (حفظ اصل سرمایه و پوشش تورم)'
               : riskProfile === 'BALANCED'
                 ? 'متعادل (رشد بهینه و ریسک کنترل‌شده)'
-                : 'تهاجمی (حداکثر بازده و نوسان‌گیری)',
+                : 'تهاجمی (تحمل نوسان بالا)',
+          liquidityNeedFa,
           question: customAdvisorQuestion,
         }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as EvidenceBoundAnalystResponse;
       if (data.answerFa) {
         setAdvisorResponse(data.answerFa);
+        setAdvisorFullData(data);
       }
     } catch {
       setAdvisorResponse('خطا در دریافت پاسخ مشاور هوشمند؛ لطفاً جدول محاسباتی بالا را بررسی نمایید.');
@@ -1295,18 +1303,33 @@ export const LiveMarketOpportunitiesView: React.FC<LiveMarketOpportunitiesViewPr
               </div>
             </div>
 
-            {/* AI Live Trade Strategist Box */}
+            {/* Evidence-Bound AI Live Analyst Box */}
             <div className="bg-slate-950/90 border border-emerald-800/50 rounded-xl p-4 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                استراتژیست هوشمند معاملات لایو (برنامه اختصاصی برای بودجه و پرسش شما)
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  تحلیلگر مستند و مقید به شواهد بازار لایو (ممیزی‌شده با محاسبات مستقل سامانه)
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-400">نیاز نقدینگی:</span>
+                  <select
+                    value={liquidityNeedFa}
+                    onChange={(e) => setLiquidityNeedFa(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
+                  >
+                    <option value="فوری / روزشمار (نقدشوندگی بالا)">فوری / روزشمار</option>
+                    <option value="متوسط (قابل دسترسی در ۱ هفته)">متوسط (۱ هفته)</option>
+                    <option value="پایین (عدم نیاز به برداشت ماهانه)">پایین (بلندمدت)</option>
+                    <option value="UNSPECIFIED">مشخص‌نشده (آزمون عدم حدس)</option>
+                  </select>
+                </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-2.5">
                 <input
                   type="text"
                   value={customAdvisorQuestion}
                   onChange={(e) => setCustomAdvisorQuestion(e.target.value)}
-                  placeholder="سؤال معاملاتی خود را بنویسید (مثلاً: با این بودجه سهام فملی و شپنا بخرم یا طلای ۱۸ عیار یا خودرو؟)"
+                  placeholder="سؤال تحلیلی خود را بنویسید..."
                   className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
                 <button
@@ -1315,14 +1338,26 @@ export const LiveMarketOpportunitiesView: React.FC<LiveMarketOpportunitiesViewPr
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition cursor-pointer shrink-0"
                 >
                   {advisorLoading
-                    ? 'در حال تدوین نقشه معامله...'
-                    : 'تولید نقشه خرید و نقاط ورود با نرخ‌های لایو'}
+                    ? 'در حال ممیزی شواهد...'
+                    : 'تحلیل مستند (بدون جعل نقطه ورود/خروج)'}
                 </button>
               </div>
 
-              {advisorResponse && (
-                <div className="mt-3 p-4 bg-slate-900/90 border border-slate-800 rounded-lg text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
-                  {advisorResponse}
+              {advisorFullData && (
+                <div className="mt-3 space-y-3">
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                    <span className="text-emerald-400">
+                      ممیز مستقل: {advisorFullData.independentVerification.auditStatus} (اعداد بدون پشتوانه:{' '}
+                      {advisorFullData.independentVerification.ungroundedNumbersDetected.length})
+                    </span>
+                    <span className="text-slate-300">
+                      درجه اطمینان: {advisorFullData.confidenceAssessment.levelFa} (
+                      {advisorFullData.confidenceAssessment.evidenceScore0To100}/100)
+                    </span>
+                  </div>
+                  <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-lg text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+                    {advisorResponse}
+                  </div>
                 </div>
               )}
             </div>

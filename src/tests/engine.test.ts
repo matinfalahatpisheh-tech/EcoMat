@@ -19,6 +19,10 @@ import {
   runDataQualityEngine,
   runPointInTimeBacktest,
 } from '../shared/analytics';
+import {
+  generateEvidenceBoundAnalystResponse,
+  runAnalystAcceptanceTestSuite,
+} from '../shared/aiAnalystEngine';
 import { INDICATORS_REGISTRY, SOURCES_REGISTRY } from '../shared/registry';
 import {
   DataFrequency,
@@ -462,6 +466,84 @@ runTest('14. Lead/Lag Analytical OLS Granger & Null-Safe Regime Detection', () =
   assert.ok(issues.length >= 4, 'Quality engine must surface revisions, outliers, and awaiting imports');
 });
 
+// 15. Evidence-Bound AI Analyst & 7 Mandatory Acceptance Test Scenarios
+runTest('15. Evidence-Bound AI Analyst & 7 Mandatory Acceptance Test Scenarios', () => {
+  const db = new EcoMatDatabase(false);
+  const snapshot = db.getFullAnalyticalSnapshot();
+
+  // Construct deterministic live market fixture for acceptance tests
+  const mockLive = {
+    fetchedAtIso: '2026-10-10T09:00:00.000Z',
+    isLiveConnectionActive: true,
+    liveSourcesUsed: ['TSETMC', 'NOBITEX'],
+    summaryIndicators: {
+      dollarFreeToman: 151550,
+      tetherUsdtToman: 151820,
+      dirhamUaeToman: 41280,
+      dirhamImpliedDollarToman: 151600,
+      dollarTetherSpreadPct: 0.18,
+      dollarDirhamSpreadPct: -0.03,
+      gold18kGramToman: 9162000,
+      gold18kIntrinsicToman: 9155000,
+      gold18kBubblePct: 0.08,
+      mithqalToman: 39688000,
+      coinEmamiToman: 261500000,
+      coinEmamiIntrinsicToman: 216800000,
+      coinEmamiBubblePct: 20.62,
+      coinHalfToman: 145000000,
+      coinHalfBubblePct: 33.7,
+      coinQuarterToman: 95000000,
+      coinQuarterBubblePct: 75.2,
+      globalOunceUsd: 3792.4,
+      paxgIrrToman: 575500000,
+      tedpixIndex: 2920000,
+      brentOilUsd: 78.5,
+      tehranHousingSqmToman: 138500000,
+      tehranHousingSqmUsd: 914,
+      housingPerGoldGramRatio: 15.12,
+    },
+    quotes: [],
+    topOpportunities: [],
+    stockOpportunities: [],
+    sectorOutlooks: [],
+  };
+
+  const bundle = {
+    ...snapshot,
+    liveMarket: mockLive,
+  };
+
+  const suiteResults = runAnalystAcceptanceTestSuite(bundle);
+  assert.equal(
+    suiteResults.length,
+    7,
+    'Must execute all 7 mandatory acceptance test scenarios'
+  );
+
+  for (const sc of suiteResults) {
+    assert.equal(
+      sc.passed,
+      true,
+      `Acceptance scenario ${sc.scenarioId} (${sc.titleFa}) failed: ${sc.actualBehaviorSummaryFa}`
+    );
+    assert.equal(sc.verdictCode, 'PASS_BOUNDARY_ENFORCED');
+  }
+
+  // Verify semantic separation is populated
+  const sampleRes = generateEvidenceBoundAnalystResponse(bundle, {
+    questionFa: 'وضعیت تورم و ارزش ذاتی طلا چگونه است؟',
+  });
+  assert.ok(sampleRes.semanticSeparation.marketPricesAndFacts.length > 0);
+  assert.ok(sampleRes.semanticSeparation.intrinsicEstimates.length > 0);
+  assert.ok(sampleRes.semanticSeparation.statisticalForecasts.length > 0);
+  assert.ok(sampleRes.semanticSeparation.scenarioAssumptions.length > 0);
+  assert.equal(sampleRes.independentVerification.passedIndependentAudit, true);
+  assert.equal(
+    sampleRes.independentVerification.ungroundedNumbersDetected.length,
+    0
+  );
+});
+
 const failed = results.filter((r) => !r.passed);
 console.log(`\n========================================`);
 console.log(`EcoMat Test Suite Summary: ${results.length - failed.length}/${results.length} Passed`);
@@ -470,3 +552,4 @@ console.log(`========================================\n`);
 if (failed.length > 0) {
   process.exit(1);
 }
+

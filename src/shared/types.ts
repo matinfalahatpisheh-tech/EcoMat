@@ -759,3 +759,154 @@ export interface LiveIranMarketSnapshot {
   sectorOutlooks: SectorDeepDiveOutlook[];
 }
 
+export type EvidenceQualityBadge =
+  | 'VERIFIED_LIVE'
+  | 'VERIFIED_OFFICIAL'
+  | 'ESTIMATED_DERIVED'
+  | 'STALE_EXPIRED'
+  | 'SOURCE_DISCREPANCY'
+  | 'SOURCE_DISCONNECTED'
+  | 'MISSING_UNAVAILABLE'
+  | 'QUARANTINED_INVALID';
+
+export type SemanticNumericCategory =
+  | 'MARKET_PRICE'
+  | 'INTRINSIC_ESTIMATE'
+  | 'STATISTICAL_FORECAST'
+  | 'SCENARIO_ASSUMPTION'
+  | 'OBSERVED_MACRO';
+
+export interface AnalystInputEvidence {
+  code: string;
+  nameFa: string;
+  value: number | null;
+  displayValueFa: string;
+  unitFa: string;
+  currencyBasis: 'IRR' | 'TOMAN' | 'USD' | 'NONE';
+  solarPeriod: string;
+  gregorianPeriod: string;
+  publicationTimestamp: string | null;
+  retrievalTimestamp: string | null;
+  ageDescriptionFa: string;
+  sourceId: string;
+  sourceNameFa: string;
+  qualityStatus: EvidenceQualityBadge;
+  qualityLabelFa: string;
+  semanticCategory: SemanticNumericCategory;
+  methodologyOrWarningFa: string;
+}
+
+export interface AnalystSemanticSeparation {
+  marketPricesAndFacts: {
+    labelFa: string;
+    code: string;
+    valueDisplayFa: string;
+    unitFa: string;
+    sourceAndTimeFa: string;
+    qualityStatus: EvidenceQualityBadge;
+    qualityLabelFa: string;
+  }[];
+  intrinsicEstimates: {
+    labelFa: string;
+    code: string;
+    estimatedValueFa: string;
+    marketComparisonFa: string;
+    formulaFa: string;
+    statusLabelFa: string;
+  }[];
+  statisticalForecasts: {
+    labelFa: string;
+    code: string;
+    horizonFa: string;
+    pointForecastFa: string;
+    interval50Fa: string;
+    interval90Fa: string;
+    oosMetricSummaryFa: string;
+    validationStatus: 'VALIDATED_OOS' | 'INSUFFICIENT_SAMPLE';
+  }[];
+  scenarioAssumptions: {
+    scenarioNameFa: string;
+    conditionalPremiseFa: string;
+    empiricalLikelihoodFa: string;
+    analystWeightFa: string;
+    invalidationTriggerFa: string;
+    distinctionNoticeFa: string;
+  }[];
+}
+
+export interface IndependentVerificationReport {
+  passedIndependentAudit: boolean;
+  auditStatus:
+    | 'VERIFIED_CLEAN'
+    | 'RESTRICTED_BY_DATA_GAPS'
+    | 'BLOCKED_UNGROUNDED_CLAIM'
+    | 'POLICY_REFUSAL_ENFORCED';
+  checkedAtIso: string;
+  unitCompatibilityStatus: 'COMPATIBLE' | 'NORMALIZED_RIAL_TOMAN_OR_SCALE';
+  unitNormalizationNotesFa: string[];
+  ungroundedNumbersDetected: string[];
+  auditChecks: {
+    checkId: string;
+    titleFa: string;
+    passed: boolean;
+    detailFa: string;
+  }[];
+  remediationAppliedFa: string | null;
+}
+
+export interface EvidenceBoundAnalystResponse {
+  questionFa: string;
+  generatedAt: string;
+  mode:
+    | 'EVIDENCE_BOUND_GEMINI_VERIFIED'
+    | 'EVIDENCE_BOUND_DETERMINISTIC_ENGINE'
+    | 'RESTRICTED_ABSTENTION_GUARD';
+  modelUsed: string;
+  analysisRestrictionStatus:
+    | 'FULL_EVIDENCE_COVERAGE'
+    | 'RESTRICTED_PARTIAL_EVIDENCE'
+    | 'ABSTAINED_INSUFFICIENT_OR_INVALID_DATA';
+  answerFa: string;
+  usedEvidence: AnalystInputEvidence[];
+  flaggedOrUnavailableInputs: AnalystInputEvidence[];
+  semanticSeparation: AnalystSemanticSeparation;
+  verifiableReasoningStepsFa: string[];
+  explicitAssumptionsFa: string[];
+  limitationsAndUncomputableFa: string[];
+  invalidationTriggersFa: string[];
+  userProfileAudit: {
+    capitalProvidedFa: string;
+    horizonProvidedFa: string;
+    riskToleranceProvidedFa: string;
+    liquidityNeedProvidedFa: string;
+    unassumedMissingFieldsFa: string[];
+    isProfileCompleteForAllocation: boolean;
+  };
+  policyGuardrailsTriggered: {
+    code: string;
+    titleFa: string;
+    actionTakenFa: string;
+  }[];
+  confidenceAssessment: {
+    level: 'HIGH' | 'MODERATE' | 'LOW' | 'ABSTAINED';
+    levelFa: string;
+    evidenceScore0To100: number;
+    rationaleFa: string;
+  };
+  independentVerification: IndependentVerificationReport;
+}
+
+export interface AcceptanceTestScenarioResult {
+  scenarioId: string;
+  scenarioNumber: number;
+  titleFa: string;
+  categoryFa: string;
+  simulatedConditionFa: string;
+  sampleUserPromptFa: string;
+  expectedBehaviorFa: string;
+  actualBehaviorSummaryFa: string;
+  passed: boolean;
+  verdictCode: 'PASS_BOUNDARY_ENFORCED' | 'FAIL_EXCEEDED_EVIDENCE';
+  analystResponse: EvidenceBoundAnalystResponse;
+}
+
