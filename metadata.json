@@ -1,0 +1,6 @@
+{
+  "name": "EcoMat — سامانه هوشمند اقتصاد کلان و تحلیل سبد دارایی ایران",
+  "description": "پلتفرم مبتنی بر شواهد برای پایش شاخص‌های اقتصاد کلان ایران، تحلیل رژیم‌های اقتصادی، آزمایشگاه سناریو و تصمیم‌گیری سبد دارایی",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

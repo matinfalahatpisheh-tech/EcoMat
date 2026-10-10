@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fa" dir="rtl" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EcoMat — سامانه هوشمند اقتصاد کلان و تحلیل سبد دارایی ایران</title>
+    <meta name="description" content="پلتفرم مبتنی بر شواهد برای پایش شاخص‌های اقتصاد کلان ایران، تحلیل رژیم‌های اقتصادی، آزمایشگاه سناریو و تصمیم‌گیری سبد دارایی" />
+    <meta property="og:title" content="EcoMat — سامانه هوشمند اقتصاد کلان و تحلیل سبد دارایی ایران" />
+    <meta property="og:description" content="پلتفرم مبتنی بر شواهد برای پایش شاخص‌های اقتصاد کلان ایران، تحلیل رژیم‌های اقتصادی، آزمایشگاه سناریو و تصمیم‌گیری سبد دارایی" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        var OrigWS = window.WebSocket;
+        if (!OrigWS) return;
+        function ViteHmrSocketShim(url, protocols) {
+          var isVite =
+            protocols === 'vite-hmr' ||
+            protocols === 'vite-ping' ||
+            (Array.isArray(protocols) &&
+              (protocols.indexOf('vite-hmr') !== -1 || protocols.indexOf('vite-ping') !== -1));
+          if (!isVite) {
+            return protocols !== undefined ? new OrigWS(url, protocols) : new OrigWS(url);
+          }
+          var target = new EventTarget();
+          target.url = String(url || '');
+          target.readyState = 1;
+          target.OPEN = 1;
+          target.CONNECTING = 0;
+          target.CLOSING = 2;
+          target.CLOSED = 3;
+          target.send = function () {};
+          target.close = function () {
+            target.readyState = 3;
+          };
+          setTimeout(function () {
+            target.dispatchEvent(new Event('open'));
+          }, 0);
+          return target;
+        }
+        ViteHmrSocketShim.prototype = OrigWS.prototype;
+        ViteHmrSocketShim.CONNECTING = 0;
+        ViteHmrSocketShim.OPEN = 1;
+        ViteHmrSocketShim.CLOSING = 2;
+        ViteHmrSocketShim.CLOSED = 3;
+        window.WebSocket = ViteHmrSocketShim;
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-sky-500/30 selection:text-sky-200">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
